@@ -1,0 +1,28 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+
+  ## Set Varaiables here
+  vars:
+    temp_pass: welcome123
+    iam_group : ehds-s3-ro-grp
+
+
+
+  vars_prompt:
+    - name: username
+      prompt: "Please enter user to be added ==>"
+      private: no
+
+  tasks:
+
+################# IAM ######################################
+  - name: Create IAM user with API keys
+    iam:
+      iam_type: user
+      name: "{{ username }}"
+      state: present
+      password: "{{ temp_pass }}"
+      groups: "{{ iam_group }}"
+

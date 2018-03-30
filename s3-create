@@ -1,0 +1,52 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+
+  ## Set Varaiables here
+  vars:
+    bucketname: dplrelease-mckesson
+    username: dplrelease-mckesson
+    temp_pass: HelloWorld987
+    bucket_policy: dplrelease-mckesson-policy.json
+
+  tasks:
+
+################# IAM ######################################
+  - name: Create IAM user with API keys
+    iam:
+      iam_type: user
+      name: "{{ item }}"
+      state: present
+      #password: "{{ temp_pass }}"
+      access_key_state: create
+    with_items:
+      - "{{ username }}"
+
+  - name: Sleep for 30secs
+    shell: "sleep 30"
+
+################ S3 ########################################
+  - name: Create S3 test bucket.
+    local_action:
+      module: s3
+      bucket: "{{ bucketname }}"
+      mode: create
+      region: 'us-east-1'
+
+  - name: Set Bucket POLICY and Custom TAGS
+    local_action:
+      module: s3_bucket
+      name: "{{ bucketname }}"
+      region: 'us-east-1'
+      versioning: no
+      policy: "{{ lookup('file', '{{ bucket_policy }}', convert_data=False) }}"
+      tags:
+        Product: DPL
+        Purpose : TEST_DATA
+        Name: "{{ bucketname }}"
+        PHI_Data : YES
+        Authorized : YES
+  - name: Create folders logs
+    shell: "aws s3api put-object --bucket {{ bucketname }}  --key logs/ "
+

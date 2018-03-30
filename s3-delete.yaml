@@ -1,0 +1,14 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    bucketname: s3-test-bucket-ansible
+
+  tasks:
+  - name: Create S3 test bucket.
+    local_action:
+      module: s3_bucket
+      bucket: "{{ bucketname }}"
+      state: absent
+
