@@ -1,0 +1,26 @@
+--- # Run command on remote servers and get output
+- hosts: cdh-all
+  remote_user: kmokha
+  become: yes
+  become_method: sudo
+  connection: ssh
+  gather_facts: no
+
+  vars_prompt:
+  - name: c2run
+    prompt: "Please enter command ==>"
+    private: no
+
+
+
+  tasks:
+
+
+  - name: Running command "{{ c2run }}"  on CDH servers
+    become: true
+    become_user: root
+    shell: "{{ c2run }}"
+    register: shell_result
+
+  - debug:
+     var: shell_result.stdout_lines
