@@ -1,0 +1,201 @@
+---
+- hosts: localhost
+  become: yes
+  vars:
+    env: "dev"
+    bitdefender_file: "bitdefender-unix64.tar"
+    splunkforwarder_file_amazon: "splunkforwarder-6.6.3-e21ee54bc796-linux-2.6-x86_64.rpm"
+    nessus_file_ubuntu: "NessusAgent-7.0.2-amzn.x86_64.deb"
+    splunkforwarder_file_ubuntu: "splunkforwarder-6.6.3-e21ee54bc796-linux-2.6-x86_64.deb"
+    bucket_name: "aon-con-deployment-packages"
+    splunk_elb: "internal-aon-con-splunk-int-elb-1128473415.us-east-1.elb.amazonaws.com"
+    splunk_elb_port: "9997"
+  tasks:
+  - name: Disable apt-daily to not interfere with package installation during user data execution
+    systemd:
+      name: "{{ item }}"
+      enabled: false
+      state: stopped
+    with_items:
+      - apt-daily.service
+      - apt-daily.timer
+    when: ansible_distribution == 'Ubuntu'
+  - name: Create /root/.ansible_files dir
+    file: 
+      path: /root/.ansible_files
+      state: directory
+  - name: upgrade all packages
+    yum:
+      name: '*'
+      state: latest
+    when: ansible_distribution == 'Amazon'
+  - name: upgrade all packages
+    apt:
+      upgrade: dist
+      update_cache: yes
+    when: ansible_distribution == 'Ubuntu'
+  - name: Install jq
+    yum:
+      name: jq
+    when: ansible_distribution == 'Amazon'
+  - name: install boto3 using pip
+    pip:
+      name: boto3
+  - name: Install jq, python-pip, python-boto
+    apt:
+      name: "{{ item }}"
+    with_items:
+      - jq
+      - python-pip
+      - python-boto
+    when: ansible_distribution == 'Ubuntu'
+  - name: Install AWS CLI
+    pip:
+      name: awscli
+  - name: Install collectd dependencies
+    yum:
+      name: "{{ item }}"
+    with_items:
+      - byacc
+      - flex
+      - automake
+      - libtool
+      - libgcrypt-devel
+      - glib2-devel
+      - libtool-ltdl-devel
+      - perl-ExtUtils-MakeMaker
+      - bison
+    when: ansible_distribution == 'Amazon'
+  - name: Copy Bitdefender and splunkforwarder from S3 on amazon linux
+    s3:
+      bucket: "{{install_bucket}}"
+      object: "/{{ item }}"
+      dest: "/tmp/{{ item }}"
+      mode: get
+      ignore_nonexistent_bucket: true
+    with_items: 
+      - {{ splunkforwarder_file_amazon }}
+      - {{ bitdefender_file }} 
+    when: ansible_distribution == 'Amazon'
+  - name: Copy Bitdefender and splunkforwarder from S3 on Ubuntu
+    s3:
+      bucket: npn-mvp-binaries 
+      object: "/{{ item }}"
+      dest: "/tmp/{{ item }}"
+      mode: get
+      ignore_nonexistent_bucket: true
+    with_items:
+      - {{ splunkforwarder_file_ubuntu }}
+      - {{ bitdefender_file }}
+    when: ansible_distribution == 'Ubuntu'
+  - name: install splunkforwarder
+    yum:
+      name: "/tmp/{{ splunkforwarder_file_amazon }}"
+      state: present
+    when: ansible_distribution == 'Amazon'
+  - name: install splunkforwarder
+    apt:
+      deb: "/tmp/{{ splunkforwarder_file_ubuntu }}"
+      state: present
+    when: ansible_distribution == 'Ubuntu'
+  - name: Install New Relic repo GPG key
+    apt_key:
+      url: https://download.newrelic.com/infrastructure_agent/gpg/newrelic-infra.gpg
+    when: ansible_distribution == 'Ubuntu'
+  - name: Add New Relic apt repo
+    apt_repository:
+      repo: deb [arch=amd64] http://download.newrelic.com/infrastructure_agent/linux/apt xenial main
+      state: present
+    when: ansible_distribution == 'Ubuntu'
+  - name: Install New Relic
+    apt:
+      name: newrelic-infra
+      update_cache: yes
+      state: present
+    when: ansible_distribution == 'Ubuntu'
+  - name: Add New Relic yum repo
+    yum_repository:
+      name: newrelic-infra
+      description: New Relic Infrastructure
+      baseurl: http://download.newrelic.com/infrastructure_agent/linux/yum/el/6/x86_64
+      gpgkey: http://download.newrelic.com/infrastructure_agent/gpg/newrelic-infra.gpg
+      gpgcheck: yes
+      repo_gpgcheck: yes
+    when: ansible_distribution == 'Amazon'
+  - name: update repo cache for the new repo
+    command: yum -q makecache -y --disablerepo='*' --enablerepo='newrelic-infra'
+    when: ansible_distribution == 'Amazon'
+  - name: Install newrelic-infra
+    yum:
+      name: newrelic-infra
+      enablerepo: newrelic-infra
+    when: ansible_distribution == 'Amazon'
+  - name: Extract BitDefender
+    unarchive:
+      src: /tmp/{{{{ bitdefender_file }}}}
+      dest: /tmp/
+      creates: /tmp/installer
+  - name: Make BitDefender installer executable
+    file:
+      path: /tmp/installer
+      owner: root
+      group: root
+      mode: 0755
+  - name: Run BitDefender installer
+    command: /tmp/installer
+    args:
+      chdir: /tmp
+      creates: /opt/BitDefender
+  - name: Install EC2 SSM
+    yum:
+      name: https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+      state: present
+    when: ansible_distribution == 'Amazon'
+  - name: Install EC2 SSM
+    apt:
+      deb: https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
+      state: present
+    when: ansible_distribution == 'Ubuntu'
+  - name: Enable SSM service
+    service:
+      name: amazon-ssm-agent
+      enabled: yes
+  - name: Retrieve AWS region we are in
+    shell: curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region
+    register: aws_region
+  - name: Install Codedeploy dependencies
+    yum:
+      name: "{{ item }}"
+    with_items:
+      - wget
+      - ruby
+    when: ansible_distribution == 'Amazon'
+  - name: Install Codedeploy dependencies
+    apt:
+      name: "{{ item }}"
+    with_items:
+      - wget
+      - ruby
+    when: ansible_distribution == 'Ubuntu'
+  - name: Download Codedeploy installer
+    get_url:
+      url: "https://aws-codedeploy-{{ aws_region.stdout }}.s3.amazonaws.com/latest/install"
+      dest: /tmp/codedeploy-install
+      mode: 0750
+      owner: root
+  - name: Run Codedeploy installer
+    command: /tmp/codedeploy-install auto
+    args:
+      chdir: /tmp/
+  - name: Create /etc/ansible dir
+    file: 
+      path: /etc/ansible
+      state: directory
+  - name: Create symlink for ansible-playbook
+    file:
+      src: /usr/local/bin/ansible-playbook
+      dest: /usr/bin/ansible-playbook
+      owner: root
+      group: root
+      state: link
+    when: ansible_distribution == 'Amazon'
